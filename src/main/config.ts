@@ -9,9 +9,9 @@ import { AppConfig } from '../shared/types';
 // the only place that ever holds the real Onshape client secret).
 // Fill these in once before cutting a release; see README.md.
 const PUBLIC_DEFAULTS = {
-  discordClientId: '',
-  onshapeClientId: '',
-  tokenRelayUrl: ''
+  discordClientId: '1548578280708247585',
+  onshapeClientId: 'ZAW73EZCXM74WHCHMENZGR7RNJ3GFP6WCIPV4JQ=',
+  tokenRelayUrl: 'https://onshape-link-token-relay.ryandennis.workers.dev'
 };
 
 const PLACEHOLDER_CLIENT_ID = 'YOUR_DISCORD_APPLICATION_ID';
