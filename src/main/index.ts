@@ -7,6 +7,7 @@ import { DiscordRpcClient } from './discord/rpc';
 import { OnshapeClient } from './onshape/client';
 import { OnshapePoller } from './onshape/poller';
 import { buildMenu, createTrayIcon, statusLine } from './tray/menu';
+import { initAutoUpdater } from './updater';
 import { DiscordConnectionState, OnshapeAuthState, OnshapeUser, PresenceState } from '../shared/types';
 
 const rootDir = app.getAppPath();
@@ -41,7 +42,7 @@ const client = new DiscordRpcClient({
 const tokenStore = new OnshapeTokenStore(app.getPath('userData'));
 const onshapeAuth = new OnshapeAuth({
   clientId: config.onshapeClientId,
-  clientSecret: config.onshapeClientSecret,
+  tokenRelayUrl: config.tokenRelayUrl,
   tokenStore,
   onStateChange: (state, user) => {
     onshapeState = state;
@@ -148,7 +149,7 @@ function openOnboardingWindow(): void {
   });
 
   onboardingWindow.setMenuBarVisibility(false);
-  void onboardingWindow.loadFile(join(rootDir, 'src', 'onboarding', 'index.html'));
+  void onboardingWindow.loadFile(join(rootDir, 'dist', 'onboarding', 'index.html'));
 
   onboardingWindow.on('closed', () => {
     onboardingWindow = null;
@@ -191,8 +192,8 @@ async function bootstrap(): Promise<void> {
     client.start();
   }
 
-  if (!config.onshapeClientId || !config.onshapeClientSecret) {
-    console.error('ONSHAPE_CLIENT_ID / ONSHAPE_CLIENT_SECRET are not set. Copy .env.example to .env and fill them in.');
+  if (!config.onshapeClientId || !config.tokenRelayUrl) {
+    console.error('ONSHAPE_CLIENT_ID / TOKEN_RELAY_URL are not set. Copy .env.example to .env and fill them in.');
   } else {
     await onshapeAuth.restoreSession();
   }
@@ -202,6 +203,10 @@ async function bootstrap(): Promise<void> {
   }
 
   onshapePoller.start();
+
+  if (app.isPackaged) {
+    initAutoUpdater();
+  }
 }
 
 void bootstrap();

@@ -1,0 +1,10 @@
+name = "onshape-link-token-relay"
+main = "src/index.js"
+compatibility_date = "2024-11-01"
+
+# ONSHAPE_CLIENT_ID is not secret (it's already baked into the desktop app),
+# but keeping it here too lets the worker reject requests for any other
+# client id. Set it with:
+#   wrangler secret put ONSHAPE_CLIENT_ID
+# The real secret:
+#   wrangler secret put ONSHAPE_CLIENT_SECRET

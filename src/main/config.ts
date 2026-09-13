@@ -2,9 +2,20 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AppConfig } from '../shared/types';
 
+// These three values are baked into every packaged build so end users never
+// configure anything themselves - they only ever click "Connect". None of
+// them are secret: OAuth/RPC client IDs are meant to be public, and the
+// relay URL just points at the token-exchange service in relay/ (which is
+// the only place that ever holds the real Onshape client secret).
+// Fill these in once before cutting a release; see README.md.
+const PUBLIC_DEFAULTS = {
+  discordClientId: '',
+  onshapeClientId: '',
+  tokenRelayUrl: ''
+};
+
 const PLACEHOLDER_CLIENT_ID = 'YOUR_DISCORD_APPLICATION_ID';
 const PLACEHOLDER_ONSHAPE_CLIENT_ID = 'YOUR_ONSHAPE_CLIENT_ID';
-const PLACEHOLDER_ONSHAPE_CLIENT_SECRET = 'YOUR_ONSHAPE_CLIENT_SECRET';
 const DEFAULT_POLL_INTERVAL_SEC = 15;
 const DEFAULT_IDLE_TIMEOUT_MIN = 10;
 
@@ -67,17 +78,22 @@ function readNumber(name: string, fallback: number): number {
 }
 
 export function loadConfig(rootDir: string): AppConfig {
+  // .env is only ever present in a local dev checkout (it's gitignored) and
+  // lets a contributor point at a test Discord/Onshape app or a local relay
+  // without touching the baked-in defaults below.
   loadEnvFile(rootDir);
 
   const clientId = (process.env.DISCORD_CLIENT_ID ?? '').trim();
   const onshapeClientId = (process.env.ONSHAPE_CLIENT_ID ?? '').trim();
-  const onshapeClientSecret = (process.env.ONSHAPE_CLIENT_SECRET ?? '').trim();
+  const tokenRelayUrl = (process.env.TOKEN_RELAY_URL ?? '').trim();
 
   return {
-    discordClientId: clientId === PLACEHOLDER_CLIENT_ID ? '' : clientId,
-    onshapeClientId: onshapeClientId === PLACEHOLDER_ONSHAPE_CLIENT_ID ? '' : onshapeClientId,
-    onshapeClientSecret:
-      onshapeClientSecret === PLACEHOLDER_ONSHAPE_CLIENT_SECRET ? '' : onshapeClientSecret,
+    discordClientId: clientId && clientId !== PLACEHOLDER_CLIENT_ID ? clientId : PUBLIC_DEFAULTS.discordClientId,
+    onshapeClientId:
+      onshapeClientId && onshapeClientId !== PLACEHOLDER_ONSHAPE_CLIENT_ID
+        ? onshapeClientId
+        : PUBLIC_DEFAULTS.onshapeClientId,
+    tokenRelayUrl: tokenRelayUrl || PUBLIC_DEFAULTS.tokenRelayUrl,
     pollIntervalSec: readNumber('POLL_INTERVAL_SEC', DEFAULT_POLL_INTERVAL_SEC),
     idleTimeoutMin: readNumber('IDLE_TIMEOUT_MIN', DEFAULT_IDLE_TIMEOUT_MIN),
     enabled: process.env.PRESENCE_ENABLED !== 'false'

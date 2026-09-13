@@ -5,7 +5,6 @@ import { OnshapeAuthState, OnshapeTokenSet, OnshapeUser } from '../../shared/typ
 import { OnshapeTokenStore } from './tokenStore';
 
 const AUTHORIZE_URL = 'https://oauth.onshape.com/oauth/authorize';
-const TOKEN_URL = 'https://oauth.onshape.com/oauth/token';
 const SESSION_URL = 'https://cad.onshape.com/api/users/session';
 const REDIRECT_PORTS = [51823, 51824];
 const REDIRECT_PATH = '/oauth/callback';
@@ -14,14 +13,19 @@ const CALLBACK_TIMEOUT_MS = 5 * 60 * 1000;
 
 export interface OnshapeAuthOptions {
   clientId: string;
-  clientSecret: string;
+  /**
+   * Base URL of the token-relay service (see relay/) that holds the real
+   * Onshape client secret. The desktop app never sees the secret - it
+   * exchanges/refreshes tokens by calling `${tokenRelayUrl}/token`.
+   */
+  tokenRelayUrl: string;
   tokenStore: OnshapeTokenStore;
   onStateChange?: (state: OnshapeAuthState, user: OnshapeUser | null) => void;
 }
 
 export class OnshapeAuth {
   private readonly clientId: string;
-  private readonly clientSecret: string;
+  private readonly tokenRelayUrl: string;
   private readonly tokenStore: OnshapeTokenStore;
   private readonly onStateChange?: (state: OnshapeAuthState, user: OnshapeUser | null) => void;
   private tokens: OnshapeTokenSet | null = null;
@@ -31,7 +35,7 @@ export class OnshapeAuth {
 
   constructor(options: OnshapeAuthOptions) {
     this.clientId = options.clientId;
-    this.clientSecret = options.clientSecret;
+    this.tokenRelayUrl = options.tokenRelayUrl.replace(/\/+$/, '');
     this.tokenStore = options.tokenStore;
     this.onStateChange = options.onStateChange;
     this.tokens = this.tokenStore.load();
@@ -218,16 +222,14 @@ export class OnshapeAuth {
   }
 
   private async requestToken(params: Record<string, string>): Promise<OnshapeTokenSet> {
-    const body = new URLSearchParams({
-      ...params,
-      client_id: this.clientId,
-      client_secret: this.clientSecret
-    });
+    if (!this.tokenRelayUrl) {
+      throw new Error('Token relay is not configured');
+    }
 
-    const response = await fetch(TOKEN_URL, {
+    const response = await fetch(`${this.tokenRelayUrl}/token`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: body.toString()
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...params, client_id: this.clientId })
     });
 
     if (!response.ok) {

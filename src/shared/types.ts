@@ -23,7 +23,7 @@ export interface PresenceState {
 export interface AppConfig {
   discordClientId: string;
   onshapeClientId: string;
-  onshapeClientSecret: string;
+  tokenRelayUrl: string;
   pollIntervalSec: number;
   idleTimeoutMin: number;
   enabled: boolean;
