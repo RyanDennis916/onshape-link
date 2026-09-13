@@ -6,7 +6,7 @@ open in Onshape as your Discord Rich Presence. NLTTL :3.
 ## Installing (end users, use Discord Desktop)
 
 1. fetch the installer for your OS from the [Releases page](https://github.com/RyanDennis916/onshape-link/releases) (`.dmg` (macOS), `.exe` (Windows), or `.AppImage`/`.deb` (Linux).)
-2. install and launch it. It runs from the tray/menu bar so don't expect a dock icon.
+2. install and launch it. It runs from the tray/menu bar so don't expect a dock icon (if you are on mac).
 3. if Discord desktop is running, presence just shows up.
 4. Onshape: a small window opens on first launch - click **Connect to Onshape**, log in in your browser. 
 5. to pull up the pop-up again: cmd/ctrl-shift-o.
