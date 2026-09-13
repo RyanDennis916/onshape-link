@@ -10,6 +10,7 @@ const REDIRECT_PORTS = [51823, 51824];
 const REDIRECT_PATH = '/oauth/callback';
 const REFRESH_MARGIN_MS = 60_000;
 const CALLBACK_TIMEOUT_MS = 5 * 60 * 1000;
+const REQUEST_TIMEOUT_MS = 15_000;
 
 export interface OnshapeAuthOptions {
   clientId: string;
@@ -108,7 +109,12 @@ export class OnshapeAuth {
 
     try {
       const { server, port } = await this.listenForCallback();
-      const redirectUri = `http://localhost:${port}${REDIRECT_PATH}`;
+      // Use the literal loopback IP, not "localhost" - on Windows "localhost"
+      // often resolves to the IPv6 loopback (::1) first, which nothing is
+      // listening on (the callback server below only binds IPv4), so the
+      // browser's request just hangs instead of falling back. RFC 8252
+      // recommends 127.0.0.1 for exactly this reason.
+      const redirectUri = `http://127.0.0.1:${port}${REDIRECT_PATH}`;
       const state = randomBytes(16).toString('hex');
       const codePromise = this.waitForCode(server, state);
 
@@ -229,7 +235,8 @@ export class OnshapeAuth {
     const response = await fetch(`${this.tokenRelayUrl}/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...params, client_id: this.clientId })
+      body: JSON.stringify({ ...params, client_id: this.clientId }),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
     });
 
     if (!response.ok) {
@@ -255,7 +262,8 @@ export class OnshapeAuth {
     }
 
     const response = await fetch(SESSION_URL, {
-      headers: { Authorization: `Bearer ${this.tokens.accessToken}` }
+      headers: { Authorization: `Bearer ${this.tokens.accessToken}` },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
     });
 
     if (!response.ok) {

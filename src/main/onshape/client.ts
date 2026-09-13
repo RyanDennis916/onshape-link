@@ -1,4 +1,5 @@
 const API_BASE = 'https://cad.onshape.com/api';
+const REQUEST_TIMEOUT_MS = 15_000;
 
 export interface OnshapeDocumentSummary {
   id: string;
@@ -61,7 +62,8 @@ export class OnshapeClient {
     }
 
     const response = await fetch(`${API_BASE}${path}`, {
-      headers: { Authorization: `Bearer ${token}` }
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
     });
 
     if (response.status === 429) {
