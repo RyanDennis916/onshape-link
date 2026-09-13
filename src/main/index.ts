@@ -1,66 +1,91 @@
-import { app, Tray, Menu, nativeImage } from 'electron';
+import { app, Tray } from 'electron';
+import { loadConfig } from './config';
 import { DiscordRpcClient } from './discord/rpc';
-import { PresenceState } from '../shared/types';
+import { buildMenu, createTrayIcon, statusLine } from './tray/menu';
+import { DiscordConnectionState, PresenceState } from '../shared/types';
 
-const clientId = process.env.DISCORD_CLIENT_ID || 'YOUR_DISCORD_APPLICATION_ID';
-const client = new DiscordRpcClient(clientId);
+const rootDir = app.getAppPath();
+const config = loadConfig(rootDir);
+
 let tray: Tray | null = null;
+let paused = !config.enabled;
 
-function buildTrayMenu(state: PresenceState): Electron.Menu {
-  return Menu.buildFromTemplate([
-    { label: `Status: ${state.status}`, enabled: false },
-    { type: 'separator' },
-    { label: `Document: ${state.details || 'Not connected'}` },
-    { label: `Tab: ${state.state || 'Waiting...'}` },
-    { type: 'separator' },
-    { label: 'Reconnect Discord', click: async () => { await client.connect(); } },
-    { label: 'Quit', role: 'quit' }
-  ]);
+const presence: PresenceState = {
+  status: 'not-connected',
+  details: 'Onshape Link',
+  state: 'Waiting for Onshape...',
+  elementType: 'unknown'
+};
+
+const client = new DiscordRpcClient({
+  clientId: config.discordClientId,
+  onStateChange: (state) => {
+    presence.status = state === 'connected' ? 'connected' : 'not-connected';
+    refreshTray();
+
+    if (state === 'connected') {
+      void client.setPresence(presence);
+    }
+  }
+});
+
+function refreshTray(): void {
+  if (!tray) {
+    return;
+  }
+
+  const view = {
+    connection: client.getState() as DiscordConnectionState,
+    presence,
+    paused
+  };
+
+  tray.setToolTip(`Onshape Link - ${statusLine(view)}`);
+  tray.setContextMenu(
+    buildMenu(view, {
+      onReconnect: () => {
+        client.reconnectNow();
+        refreshTray();
+      },
+      onTogglePause: () => {
+        paused = !paused;
+        void client.setPaused(paused).then(refreshTray);
+      }
+    })
+  );
 }
 
 async function bootstrap(): Promise<void> {
   await app.whenReady();
 
-  const icon = nativeImage.createEmpty();
-  tray = new Tray(icon.resize({ width: 16, height: 16 }));
+  app.dock?.hide();
 
-  const defaultPresence: PresenceState = {
-    status: 'not-connected',
-    details: 'Onshape Link',
-    state: 'Starting...'
-  };
+  tray = new Tray(createTrayIcon(rootDir));
+  refreshTray();
 
-  tray.setToolTip('Onshape Link');
-  tray.setContextMenu(buildTrayMenu(defaultPresence));
-
-  try {
-    await client.connect();
-    await client.setPresence(defaultPresence);
-    tray.setContextMenu(buildTrayMenu({
-      status: 'connected',
-      details: 'Onshape Link',
-      state: 'Discord connected'
-    }));
-  } catch (error) {
-    console.error('Startup connect failed', error);
-    tray.setContextMenu(buildTrayMenu({
-      status: 'not-connected',
-      details: 'Discord unavailable',
-      state: 'Check Discord status'
-    }));
+  if (!config.discordClientId) {
+    console.error('DISCORD_CLIENT_ID is not set. Copy .env.example to .env and fill it in.');
+    return;
   }
 
-  app.on('activate', () => {
-    if (tray) {
-      tray.popUpContextMenu();
-    }
-  });
+  if (paused) {
+    await client.setPaused(true);
+  }
+
+  await client.setPresence(presence);
+  client.start();
 }
 
-bootstrap();
+void bootstrap();
+
+app.on('activate', () => {
+  tray?.popUpContextMenu();
+});
+
+app.on('before-quit', () => {
+  client.stop();
+});
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
+  return;
 });
