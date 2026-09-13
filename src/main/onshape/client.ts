@@ -24,9 +24,10 @@ export class OnshapeClient {
   constructor(private readonly getAccessToken: () => Promise<string | null>) {}
 
   public async getMostRecentDocument(): Promise<OnshapeDocumentSummary | null> {
-    const payload = await this.request<{ items: RawDocument[] }>(
-      '/documents?sortColumn=modifiedAt&sortOrder=desc&limit=1'
-    );
+    // filter=5 ("recent") returns documents ordered by when the current user last
+    // opened them, unlike sortColumn=modifiedAt which reflects edits by anyone
+    // with access and misses documents that are open but haven't been changed.
+    const payload = await this.request<{ items: RawDocument[] }>('/documents?filter=5&limit=1');
     const doc = payload.items?.[0];
     if (!doc) {
       return null;
