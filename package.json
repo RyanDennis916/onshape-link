@@ -1,6 +1,6 @@
 {
   "name": "onshape-link",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "private": true,
   "main": "dist/main/index.js",
   "scripts": {
@@ -14,7 +14,7 @@
     "release": "npm run build && electron-builder --publish always"
   },
   "description": "A simple link to Discord for Onshape users.",
-  "author": "Ryan Dennis",
+  "author": "Ryan Dennis <monkeysinparis67@gmail.com>",
   "dependencies": {
     "@xhayper/discord-rpc": "^1.3.4",
     "discord-api-types": "^0.38.55",
