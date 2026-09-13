@@ -109,12 +109,7 @@ export class OnshapeAuth {
 
     try {
       const { server, port } = await this.listenForCallback();
-      // Use the literal loopback IP, not "localhost" - on Windows "localhost"
-      // often resolves to the IPv6 loopback (::1) first, which nothing is
-      // listening on (the callback server below only binds IPv4), so the
-      // browser's request just hangs instead of falling back. RFC 8252
-      // recommends 127.0.0.1 for exactly this reason.
-      const redirectUri = `http://127.0.0.1:${port}${REDIRECT_PATH}`;
+      const redirectUri = `http://localhost:${port}${REDIRECT_PATH}`;
       const state = randomBytes(16).toString('hex');
       const codePromise = this.waitForCode(server, state);
 
@@ -158,7 +153,15 @@ export class OnshapeAuth {
         });
 
         server.once('listening', () => resolve({ server, port }));
-        server.listen(port, '127.0.0.1');
+        // No host means Node binds the unspecified address, which is
+        // dual-stack (IPv4 + IPv6) on every platform we ship to. That
+        // matters because Onshape's OAuth app config only accepts
+        // "localhost" (not an IP literal) as a redirect host, and
+        // "localhost" can resolve to either 127.0.0.1 or ::1 depending on
+        // the OS - Windows commonly picks ::1 first. Binding only IPv4 (as
+        // this used to) left the server deaf to that request, so the
+        // browser's callback just hung instead of completing.
+        server.listen(port);
       };
 
       tryPort(0);
