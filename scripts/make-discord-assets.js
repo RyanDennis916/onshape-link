@@ -20,12 +20,8 @@ function cube(surface, cx, cy, r, weight) {
   return surface.paint(stroke(cubeSegments(cx, cy, r), weight), WHITE);
 }
 
-function onshape() {
-  return cube(base([20, 128, 140]), SIZE / 2, SIZE / 2, SIZE * 0.3, SIZE * 0.038).toPng();
-}
-
 function active() {
-  return cube(base([59, 165, 93]), SIZE / 2, SIZE / 2, SIZE * 0.3, SIZE * 0.045).toPng();
+  return base([59, 165, 93]).paint(circle(SIZE / 2, SIZE / 2, SIZE * 0.32), WHITE).toPng();
 }
 
 function idle() {
@@ -77,7 +73,6 @@ const outDir = path.join(__dirname, '..', 'build', 'discord-assets');
 fs.mkdirSync(outDir, { recursive: true });
 
 const assets = {
-  onshape,
   active,
   idle,
   'part-studio': partStudio,
@@ -89,3 +84,6 @@ for (const [name, render] of Object.entries(assets)) {
   fs.writeFileSync(path.join(outDir, `${name}.png`), render());
   console.log(`wrote ${name}.png`);
 }
+
+fs.copyFileSync(path.join(__dirname, 'assets', 'onshape-logo.png'), path.join(outDir, 'onshape.png'));
+console.log('wrote onshape.png (official logo)');

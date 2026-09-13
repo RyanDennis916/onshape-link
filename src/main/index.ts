@@ -4,6 +4,8 @@ import { loadConfig } from './config';
 import { OnshapeAuth } from './auth/oauth';
 import { OnshapeTokenStore } from './auth/tokenStore';
 import { DiscordRpcClient } from './discord/rpc';
+import { OnshapeClient } from './onshape/client';
+import { OnshapePoller } from './onshape/poller';
 import { buildMenu, createTrayIcon, statusLine } from './tray/menu';
 import { DiscordConnectionState, OnshapeAuthState, OnshapeUser, PresenceState } from '../shared/types';
 
@@ -50,6 +52,33 @@ const onshapeAuth = new OnshapeAuth({
     if (state === 'connected' && onboardingWindow) {
       setTimeout(() => onboardingWindow?.close(), 1500);
     }
+
+    if (state !== 'connected') {
+      presence.status = 'not-connected';
+      presence.details = 'Onshape Link';
+      presence.state = 'Waiting for Onshape...';
+      presence.elementType = 'unknown';
+      presence.documentUrl = undefined;
+      void client.setPresence(presence);
+    }
+  }
+});
+
+const onshapeClient = new OnshapeClient(() => onshapeAuth.getAccessToken());
+const onshapePoller = new OnshapePoller({
+  client: onshapeClient,
+  pollIntervalSec: config.pollIntervalSec,
+  idleTimeoutMin: config.idleTimeoutMin,
+  isSignedIn: () => onshapeState === 'connected',
+  onPresence: (newPresence) => {
+    presence.status = newPresence.status;
+    presence.details = newPresence.details;
+    presence.state = newPresence.state;
+    presence.elementType = newPresence.elementType;
+    presence.documentUrl = newPresence.documentUrl;
+    presence.startedAt = newPresence.startedAt;
+    refreshTray();
+    void client.setPresence(presence);
   }
 });
 
@@ -171,6 +200,8 @@ async function bootstrap(): Promise<void> {
   if (onshapeState !== 'connected') {
     openOnboardingWindow();
   }
+
+  onshapePoller.start();
 }
 
 void bootstrap();
@@ -181,6 +212,7 @@ app.on('activate', () => {
 
 app.on('before-quit', () => {
   client.stop();
+  onshapePoller.stop();
   globalShortcut.unregisterAll();
 });
 

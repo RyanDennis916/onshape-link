@@ -1,4 +1,5 @@
 import type { SetActivity } from '@xhayper/discord-rpc';
+import { ActivityType } from 'discord-api-types/v10';
 import { ElementType, PresenceState } from '../../shared/types';
 
 const ONSHAPE_URL = 'https://app.onshape.com';
@@ -28,6 +29,8 @@ export function toActivity(state: PresenceState, startedAt: number): SetActivity
   const idle = state.status === 'idle';
 
   return {
+    name: 'Onshape',
+    type: ActivityType.Playing,
     details: clamp(state.details, 'Onshape'),
     state: clamp(state.state, idle ? 'Idle' : 'Working'),
     largeImageKey: 'onshape',
