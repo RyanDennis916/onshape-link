@@ -8,14 +8,16 @@ import { OnshapeClient } from './onshape/client';
 import { OnshapePoller } from './onshape/poller';
 import { buildMenu, createTrayIcon, statusLine } from './tray/menu';
 import { initAutoUpdater } from './updater';
+import { SettingsStore } from './settings';
 import { DiscordConnectionState, OnshapeAuthState, OnshapeUser, PresenceState } from '../shared/types';
 
 const rootDir = app.getAppPath();
 const config = loadConfig(rootDir);
+const settingsStore = new SettingsStore(app.getPath('userData'));
 
 let tray: Tray | null = null;
 let onboardingWindow: BrowserWindow | null = null;
-let paused = !config.enabled;
+let paused = !settingsStore.loadPresenceEnabled(config.enabled);
 let onshapeState: OnshapeAuthState = 'signed-out';
 let onshapeUser: OnshapeUser | null = null;
 
@@ -29,15 +31,27 @@ const presence: PresenceState = {
 const client = new DiscordRpcClient({
   clientId: config.discordClientId,
   onStateChange: (state) => {
-    presence.status = state === 'connected' ? 'connected' : 'not-connected';
     refreshTray();
     broadcastOnshapeState();
 
     if (state === 'connected') {
-      void client.setPresence(presence);
+      applyPresence();
     }
   }
 });
+
+// Only ever push a real, poller-derived, actively-in-use presence to
+// Discord. Everything else - not signed in, or the "idle" status the poller
+// reports once a document hasn't been touched in a while, which is the
+// closest signal we have to "Onshape isn't actually open anymore" - should
+// show no activity at all instead of a stale/placeholder one.
+function applyPresence(): void {
+  if (onshapeState === 'connected' && presence.status === 'connected') {
+    void client.setPresence(presence);
+  } else {
+    void client.clearPresence();
+  }
+}
 
 const tokenStore = new OnshapeTokenStore(app.getPath('userData'));
 const onshapeAuth = new OnshapeAuth({
@@ -60,7 +74,7 @@ const onshapeAuth = new OnshapeAuth({
       presence.state = 'Waiting for Onshape...';
       presence.elementType = 'unknown';
       presence.documentUrl = undefined;
-      void client.setPresence(presence);
+      applyPresence();
     }
   }
 });
@@ -79,7 +93,7 @@ const onshapePoller = new OnshapePoller({
     presence.documentUrl = newPresence.documentUrl;
     presence.startedAt = newPresence.startedAt;
     refreshTray();
-    void client.setPresence(presence);
+    applyPresence();
   }
 });
 
@@ -105,6 +119,7 @@ function refreshTray(): void {
       },
       onTogglePause: () => {
         paused = !paused;
+        settingsStore.savePresenceEnabled(!paused);
         void client.setPaused(paused).then(refreshTray);
       },
       onOpenOnboarding: () => {
@@ -188,7 +203,6 @@ async function bootstrap(): Promise<void> {
       await client.setPaused(true);
     }
 
-    await client.setPresence(presence);
     client.start();
   }
 

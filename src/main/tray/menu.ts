@@ -66,7 +66,6 @@ export function onshapeStatusLine(view: TrayView): string {
 }
 
 export function buildMenu(view: TrayView, callbacks: TrayCallbacks): Electron.Menu {
-  const connected = view.connection === 'connected';
   const onshapeConnected = view.onshape === 'connected';
 
   return Menu.buildFromTemplate([
@@ -79,7 +78,6 @@ export function buildMenu(view: TrayView, callbacks: TrayCallbacks): Electron.Me
     { label: 'Open Onshape Link', click: callbacks.onOpenOnboarding },
     {
       label: view.paused ? 'Resume Presence Updates' : 'Pause Presence Updates',
-      enabled: connected,
       click: callbacks.onTogglePause
     },
     { label: 'Reconnect Discord', click: callbacks.onReconnect },
