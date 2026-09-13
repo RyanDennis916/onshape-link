@@ -22,7 +22,22 @@ export interface PresenceState {
 
 export interface AppConfig {
   discordClientId: string;
+  onshapeClientId: string;
+  onshapeClientSecret: string;
   pollIntervalSec: number;
   idleTimeoutMin: number;
   enabled: boolean;
+}
+
+export type OnshapeAuthState = 'signed-out' | 'connecting' | 'connected' | 'error';
+
+export interface OnshapeTokenSet {
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: number;
+}
+
+export interface OnshapeUser {
+  id: string;
+  name: string;
 }

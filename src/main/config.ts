@@ -3,6 +3,8 @@ import { join } from 'node:path';
 import { AppConfig } from '../shared/types';
 
 const PLACEHOLDER_CLIENT_ID = 'YOUR_DISCORD_APPLICATION_ID';
+const PLACEHOLDER_ONSHAPE_CLIENT_ID = 'YOUR_ONSHAPE_CLIENT_ID';
+const PLACEHOLDER_ONSHAPE_CLIENT_SECRET = 'YOUR_ONSHAPE_CLIENT_SECRET';
 const DEFAULT_POLL_INTERVAL_SEC = 15;
 const DEFAULT_IDLE_TIMEOUT_MIN = 10;
 
@@ -68,9 +70,14 @@ export function loadConfig(rootDir: string): AppConfig {
   loadEnvFile(rootDir);
 
   const clientId = (process.env.DISCORD_CLIENT_ID ?? '').trim();
+  const onshapeClientId = (process.env.ONSHAPE_CLIENT_ID ?? '').trim();
+  const onshapeClientSecret = (process.env.ONSHAPE_CLIENT_SECRET ?? '').trim();
 
   return {
     discordClientId: clientId === PLACEHOLDER_CLIENT_ID ? '' : clientId,
+    onshapeClientId: onshapeClientId === PLACEHOLDER_ONSHAPE_CLIENT_ID ? '' : onshapeClientId,
+    onshapeClientSecret:
+      onshapeClientSecret === PLACEHOLDER_ONSHAPE_CLIENT_SECRET ? '' : onshapeClientSecret,
     pollIntervalSec: readNumber('POLL_INTERVAL_SEC', DEFAULT_POLL_INTERVAL_SEC),
     idleTimeoutMin: readNumber('IDLE_TIMEOUT_MIN', DEFAULT_IDLE_TIMEOUT_MIN),
     enabled: process.env.PRESENCE_ENABLED !== 'false'

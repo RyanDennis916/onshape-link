@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Onshape Link</title>
+<style>
+  body {
+    margin: 0;
+    height: 100vh;
+    box-sizing: border-box;
+    padding: 28px 24px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #1e1f22;
+    color: #f2f2f2;
+  }
+  h1 {
+    font-size: 16px;
+    margin: 0 0 20px;
+  }
+  .row {
+    width: 100%;
+    max-width: 280px;
+    display: flex;
+    justify-content: space-between;
+    padding: 10px 0;
+    border-bottom: 1px solid #333;
+    font-size: 13px;
+  }
+  .row span:first-child {
+    color: #9aa0a6;
+  }
+  button {
+    margin-top: 24px;
+    padding: 10px 22px;
+    font-size: 14px;
+    border-radius: 6px;
+    border: none;
+    background: #4c8bf5;
+    color: white;
+    cursor: pointer;
+  }
+  button:disabled {
+    background: #444;
+    cursor: default;
+  }
+  .hint {
+    font-size: 12px;
+    color: #9aa0a6;
+    margin-top: 14px;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+  <h1>Onshape Link</h1>
+  <div class="row"><span>Discord</span><span id="discord-status">Checking...</span></div>
+  <div class="row"><span>Onshape</span><span id="onshape-status">Checking...</span></div>
+  <button id="connect-button">Connect to Onshape</button>
+  <div class="hint" id="hint"></div>
+  <script>
+    const discordEl = document.getElementById('discord-status');
+    const onshapeEl = document.getElementById('onshape-status');
+    const button = document.getElementById('connect-button');
+    const hint = document.getElementById('hint');
+
+    const DISCORD_LABELS = {
+      connected: 'Connected',
+      connecting: 'Connecting...',
+      disconnected: 'Not running',
+      unavailable: 'Not detected',
+      unconfigured: 'Not configured'
+    };
+
+    const ONSHAPE_LABELS = {
+      'signed-out': 'Not connected',
+      connecting: 'Connecting...',
+      connected: 'Connected',
+      error: 'Connection error'
+    };
+
+    function render(state) {
+      discordEl.textContent = DISCORD_LABELS[state.discordState] || state.discordState;
+      onshapeEl.textContent =
+        state.onshapeState === 'connected' && state.onshapeUser
+          ? 'Connected as ' + state.onshapeUser.name
+          : ONSHAPE_LABELS[state.onshapeState] || state.onshapeState;
+
+      button.disabled = state.onshapeState === 'connecting';
+      button.textContent = state.onshapeState === 'connected' ? 'Reconnect Onshape' : 'Connect to Onshape';
+      hint.textContent =
+        state.onshapeState === 'connected'
+          ? 'You can close this window.'
+          : 'Opens your browser to sign in to Onshape.';
+    }
+
+    button.addEventListener('click', () => {
+      window.onshapeLink.connect();
+    });
+
+    window.onshapeLink.onStateChange(render);
+    window.onshapeLink.getState().then(render);
+  </script>
+</body>
+</html>

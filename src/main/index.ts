@@ -1,14 +1,20 @@
-import { app, Tray } from 'electron';
+import { app, BrowserWindow, globalShortcut, ipcMain, Tray } from 'electron';
+import { join } from 'node:path';
 import { loadConfig } from './config';
+import { OnshapeAuth } from './auth/oauth';
+import { OnshapeTokenStore } from './auth/tokenStore';
 import { DiscordRpcClient } from './discord/rpc';
 import { buildMenu, createTrayIcon, statusLine } from './tray/menu';
-import { DiscordConnectionState, PresenceState } from '../shared/types';
+import { DiscordConnectionState, OnshapeAuthState, OnshapeUser, PresenceState } from '../shared/types';
 
 const rootDir = app.getAppPath();
 const config = loadConfig(rootDir);
 
 let tray: Tray | null = null;
+let onboardingWindow: BrowserWindow | null = null;
 let paused = !config.enabled;
+let onshapeState: OnshapeAuthState = 'signed-out';
+let onshapeUser: OnshapeUser | null = null;
 
 const presence: PresenceState = {
   status: 'not-connected',
@@ -22,9 +28,27 @@ const client = new DiscordRpcClient({
   onStateChange: (state) => {
     presence.status = state === 'connected' ? 'connected' : 'not-connected';
     refreshTray();
+    broadcastOnshapeState();
 
     if (state === 'connected') {
       void client.setPresence(presence);
+    }
+  }
+});
+
+const tokenStore = new OnshapeTokenStore(app.getPath('userData'));
+const onshapeAuth = new OnshapeAuth({
+  clientId: config.onshapeClientId,
+  clientSecret: config.onshapeClientSecret,
+  tokenStore,
+  onStateChange: (state, user) => {
+    onshapeState = state;
+    onshapeUser = user;
+    refreshTray();
+    broadcastOnshapeState();
+
+    if (state === 'connected' && onboardingWindow) {
+      setTimeout(() => onboardingWindow?.close(), 1500);
     }
   }
 });
@@ -37,7 +61,9 @@ function refreshTray(): void {
   const view = {
     connection: client.getState() as DiscordConnectionState,
     presence,
-    paused
+    paused,
+    onshape: onshapeState,
+    onshapeUserName: onshapeUser?.name ?? null
   };
 
   tray.setToolTip(`Onshape Link - ${statusLine(view)}`);
@@ -50,10 +76,67 @@ function refreshTray(): void {
       onTogglePause: () => {
         paused = !paused;
         void client.setPaused(paused).then(refreshTray);
+      },
+      onOpenOnboarding: () => {
+        openOnboardingWindow();
+      },
+      onDisconnectOnshape: () => {
+        onshapeAuth.logout();
+        refreshTray();
+        broadcastOnshapeState();
       }
     })
   );
 }
+
+function broadcastOnshapeState(): void {
+  onboardingWindow?.webContents.send('onshape:state', {
+    discordState: client.getState() as DiscordConnectionState,
+    onshapeState,
+    onshapeUser
+  });
+}
+
+function openOnboardingWindow(): void {
+  if (onboardingWindow) {
+    onboardingWindow.show();
+    onboardingWindow.focus();
+    return;
+  }
+
+  onboardingWindow = new BrowserWindow({
+    width: 340,
+    height: 360,
+    resizable: false,
+    minimizable: false,
+    fullscreenable: false,
+    title: 'Onshape Link',
+    webPreferences: {
+      preload: join(app.getAppPath(), 'dist', 'onboarding', 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+
+  onboardingWindow.setMenuBarVisibility(false);
+  void onboardingWindow.loadFile(join(rootDir, 'src', 'onboarding', 'index.html'));
+
+  onboardingWindow.on('closed', () => {
+    onboardingWindow = null;
+  });
+}
+
+ipcMain.handle('onshape:connect', () => {
+  return onshapeAuth.login().catch((error) => {
+    console.error('Onboarding connect failed', error);
+  });
+});
+
+ipcMain.handle('onshape:get-state', () => ({
+  discordState: client.getState() as DiscordConnectionState,
+  onshapeState,
+  onshapeUser
+}));
 
 async function bootstrap(): Promise<void> {
   await app.whenReady();
@@ -61,29 +144,44 @@ async function bootstrap(): Promise<void> {
   app.dock?.hide();
 
   tray = new Tray(createTrayIcon(rootDir));
+  tray.on('double-click', () => openOnboardingWindow());
   refreshTray();
+
+  globalShortcut.register('CommandOrControl+Shift+O', () => {
+    openOnboardingWindow();
+  });
 
   if (!config.discordClientId) {
     console.error('DISCORD_CLIENT_ID is not set. Copy .env.example to .env and fill it in.');
-    return;
+  } else {
+    if (paused) {
+      await client.setPaused(true);
+    }
+
+    await client.setPresence(presence);
+    client.start();
   }
 
-  if (paused) {
-    await client.setPaused(true);
+  if (!config.onshapeClientId || !config.onshapeClientSecret) {
+    console.error('ONSHAPE_CLIENT_ID / ONSHAPE_CLIENT_SECRET are not set. Copy .env.example to .env and fill them in.');
+  } else {
+    await onshapeAuth.restoreSession();
   }
 
-  await client.setPresence(presence);
-  client.start();
+  if (onshapeState !== 'connected') {
+    openOnboardingWindow();
+  }
 }
 
 void bootstrap();
 
 app.on('activate', () => {
-  tray?.popUpContextMenu();
+  openOnboardingWindow();
 });
 
 app.on('before-quit', () => {
   client.stop();
+  globalShortcut.unregisterAll();
 });
 
 app.on('window-all-closed', () => {
