@@ -6,7 +6,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "npm run build && electron .",
-    "dev": "npm run build && electron ."
+    "dev": "npm run build && electron .",
+    "icons": "node scripts/make-tray-icon.js",
+    "assets": "node scripts/make-discord-assets.js"
   },
   "dependencies": {
     "@xhayper/discord-rpc": "^1.3.4",
