@@ -4,3 +4,5 @@ release/
 .env
 .DS_Store
 onshape-discord-rpc-plan.md
+.wrangler/
+.dev.vars*

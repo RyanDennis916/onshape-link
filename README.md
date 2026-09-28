@@ -12,7 +12,7 @@ open in Onshape as your Discord Rich Presence. NLTTL :3.
 5. to pull up the pop-up again: cmd/ctrl-shift-o.
 
 
-> **macOS note:** builds aren't approved/signed yet, so it will call the app "damaged" or from an "unidentified developer" on first open. Right-click the app → **Open**, or run `xattr -cr "/Applications/Onshape Link.app"` once.
+> **macOS note:** builds aren't notarized by Apple yet, so the first launch is blocked as coming from an unidentified developer. Open it once, dismiss the warning, then go to **System Settings → Privacy & Security** and click **Open Anyway** (on older macOS, right-click the app → **Open** also works). Alternatively, run `xattr -cr "/Applications/Onshape Link.app"` once.
 > **Auto-update:** works out of the box on Windows/Linux. macOS auto-update requires a signed build, so until this is signed, you macOS users have to update by re-downloading from Releases. Pretty annoying.
 
 ## Development

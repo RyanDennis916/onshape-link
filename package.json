@@ -29,6 +29,7 @@
   "build": {
     "appId": "com.ryandennis.onshape-link",
     "productName": "Onshape Link",
+    "afterPack": "scripts/adhoc-sign.js",
     "files": [
       "dist/**/*",
       "build/trayTemplate.png",
