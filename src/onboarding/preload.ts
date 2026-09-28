@@ -5,6 +5,7 @@ export interface OnboardingState {
   discordState: DiscordConnectionState;
   onshapeState: OnshapeAuthState;
   onshapeUser: OnshapeUser | null;
+  onshapeError: string | null;
 }
 
 contextBridge.exposeInMainWorld('onshapeLink', {

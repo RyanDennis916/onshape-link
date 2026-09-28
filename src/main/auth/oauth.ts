@@ -5,12 +5,41 @@ import { OnshapeAuthState, OnshapeTokenSet, OnshapeUser } from '../../shared/typ
 import { OnshapeTokenStore } from './tokenStore';
 
 const AUTHORIZE_URL = 'https://oauth.onshape.com/oauth/authorize';
-const SESSION_URL = 'https://cad.onshape.com/api/users/session';
+// Onshape's documented "user profile" endpoint for OAuth apps. (GET
+// /users/session is not it - that one never returned a usable profile, so
+// every otherwise-successful login ended in "Connection error".)
+const SESSION_URL = 'https://cad.onshape.com/api/users/sessioninfo';
+// Every port here must be registered, exactly as
+// http://localhost:<port>/oauth/callback, as a redirect URL on the Onshape
+// OAuth app. Onshape refuses to redirect to anything else, which from the
+// app's side looks like a login that never comes back.
 const REDIRECT_PORTS = [51823, 51824];
 const REDIRECT_PATH = '/oauth/callback';
 const REFRESH_MARGIN_MS = 60_000;
 const CALLBACK_TIMEOUT_MS = 5 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 15_000;
+
+/**
+ * Raised when the token endpoint answers but refuses the request (as
+ * opposed to a network failure), which is the only case where the stored
+ * tokens are known to be dead and should be thrown away.
+ */
+class OnshapeTokenRejectedError extends Error {
+  constructor(public readonly status: number, detail: string) {
+    super(`Onshape token request failed (${status})${detail ? `: ${detail}` : ''}`);
+  }
+}
+
+class LoginCancelledError extends Error {
+  constructor() {
+    super('Login attempt was superseded by a newer one');
+  }
+}
+
+interface PendingCallback {
+  server: Server;
+  cancel: () => void;
+}
 
 export interface OnshapeAuthOptions {
   clientId: string;
@@ -32,7 +61,9 @@ export class OnshapeAuth {
   private tokens: OnshapeTokenSet | null = null;
   private user: OnshapeUser | null = null;
   private state: OnshapeAuthState = 'signed-out';
-  private loginInFlight: Promise<void> | null = null;
+  private lastError: string | null = null;
+  private loginAttempt = 0;
+  private pendingCallback: PendingCallback | null = null;
 
   constructor(options: OnshapeAuthOptions) {
     this.clientId = options.clientId;
@@ -50,6 +81,10 @@ export class OnshapeAuth {
     return this.user;
   }
 
+  public getLastError(): string | null {
+    return this.lastError;
+  }
+
   public async restoreSession(): Promise<void> {
     if (!this.tokens) {
       this.setState('signed-out');
@@ -64,47 +99,21 @@ export class OnshapeAuth {
       this.setState('connected');
     } catch (error) {
       console.error('Failed to restore Onshape session', error);
-      this.tokens = null;
-      this.tokenStore.clear();
-      this.setState('error');
+      this.dropTokensIfRejected(error);
+      this.setState('error', error);
     }
   }
 
-  public login(): Promise<void> {
-    if (!this.loginInFlight) {
-      this.loginInFlight = this.runLoginFlow().finally(() => {
-        this.loginInFlight = null;
-      });
-    }
-
-    return this.loginInFlight;
-  }
-
-  public logout(): void {
-    this.tokens = null;
-    this.user = null;
-    this.tokenStore.clear();
-    this.setState('signed-out');
-  }
-
-  public async getAccessToken(): Promise<string | null> {
-    if (!this.tokens) {
-      return null;
-    }
-
-    try {
-      await this.ensureFreshToken();
-      return this.tokens.accessToken;
-    } catch (error) {
-      console.error('Failed to refresh Onshape token', error);
-      this.tokens = null;
-      this.tokenStore.clear();
-      this.setState('error');
-      return null;
-    }
-  }
-
-  private async runLoginFlow(): Promise<void> {
+  /**
+   * Starts a fresh browser login. Calling this while a previous attempt is
+   * still waiting for its callback cancels that attempt (closing its
+   * callback server) instead of piling up behind it - otherwise one
+   * abandoned browser tab would leave the app stuck on "Connecting..." until
+   * the callback timeout, with the redirect port still held.
+   */
+  public async login(): Promise<void> {
+    const attempt = ++this.loginAttempt;
+    this.cancelPendingCallback();
     this.setState('connecting');
 
     try {
@@ -121,27 +130,90 @@ export class OnshapeAuth {
       await shell.openExternal(authorizeUrl.toString());
 
       const code = await codePromise;
-      this.tokens = await this.exchangeCode(code, redirectUri);
-      this.tokenStore.save(this.tokens);
+      const tokens = await this.exchangeCode(code, redirectUri);
+      if (attempt !== this.loginAttempt) {
+        return;
+      }
+
+      this.tokens = tokens;
+      this.tokenStore.save(tokens);
       this.user = await this.fetchCurrentUser();
-      this.setState('connected');
+      if (attempt === this.loginAttempt) {
+        this.setState('connected');
+      }
     } catch (error) {
+      if (error instanceof LoginCancelledError || attempt !== this.loginAttempt) {
+        return;
+      }
+
       console.error('Onshape login failed', error);
-      this.setState('error');
+      this.setState('error', error);
       throw error;
     }
+  }
+
+  public logout(): void {
+    this.loginAttempt++;
+    this.cancelPendingCallback();
+    this.tokens = null;
+    this.user = null;
+    this.tokenStore.clear();
+    this.setState('signed-out');
+  }
+
+  public async getAccessToken(): Promise<string | null> {
+    if (!this.tokens) {
+      return null;
+    }
+
+    try {
+      await this.ensureFreshToken();
+      return this.tokens.accessToken;
+    } catch (error) {
+      console.error('Failed to refresh Onshape token', error);
+      // A network blip shouldn't sign the user out; only a refusal from
+      // Onshape means the refresh token is actually dead.
+      if (this.dropTokensIfRejected(error)) {
+        this.setState('error', error);
+      }
+      return null;
+    }
+  }
+
+  private dropTokensIfRejected(error: unknown): boolean {
+    if (error instanceof OnshapeTokenRejectedError && error.status >= 400 && error.status < 500) {
+      this.tokens = null;
+      this.user = null;
+      this.tokenStore.clear();
+      return true;
+    }
+    return false;
+  }
+
+  private cancelPendingCallback(): void {
+    this.pendingCallback?.cancel();
+    this.pendingCallback = null;
   }
 
   private listenForCallback(): Promise<{ server: Server; port: number }> {
     return new Promise((resolve, reject) => {
       const tryPort = (index: number): void => {
         if (index >= REDIRECT_PORTS.length) {
-          reject(new Error('No configured redirect port is available'));
+          reject(
+            new Error(
+              `Ports ${REDIRECT_PORTS.join(', ')} are all in use - is another copy of Onshape Link running?`
+            )
+          );
           return;
         }
 
         const port = REDIRECT_PORTS[index];
         const server = createServer();
+        // Browsers hold loopback connections open. Without this, a later
+        // login's redirect could be answered over a kept-alive socket by an
+        // earlier attempt's (already closed) server and never reach the
+        // current one, which just stalls on "Connecting...".
+        server.keepAliveTimeout = 0;
 
         server.once('error', (error: NodeJS.ErrnoException) => {
           server.close();
@@ -158,9 +230,7 @@ export class OnshapeAuth {
         // matters because Onshape's OAuth app config only accepts
         // "localhost" (not an IP literal) as a redirect host, and
         // "localhost" can resolve to either 127.0.0.1 or ::1 depending on
-        // the OS - Windows commonly picks ::1 first. Binding only IPv4 (as
-        // this used to) left the server deaf to that request, so the
-        // browser's callback just hung instead of completing.
+        // the OS - Windows commonly picks ::1 first.
         server.listen(port);
       };
 
@@ -170,38 +240,67 @@ export class OnshapeAuth {
 
   private waitForCode(server: Server, expectedState: string): Promise<string> {
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
+      let settled = false;
+
+      const finish = (error: Error | null, code?: string): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timeout);
         server.close();
-        reject(new Error('Timed out waiting for Onshape OAuth callback'));
-      }, CALLBACK_TIMEOUT_MS);
+        server.closeAllConnections();
+        if (this.pendingCallback?.server === server) {
+          this.pendingCallback = null;
+        }
+        if (error) {
+          reject(error);
+        } else {
+          resolve(code as string);
+        }
+      };
+
+      const timeout = setTimeout(
+        () => finish(new Error('Timed out waiting for the Onshape login to finish in the browser')),
+        CALLBACK_TIMEOUT_MS
+      );
+
+      this.pendingCallback = { server, cancel: () => finish(new LoginCancelledError()) };
 
       server.on('request', (req, res) => {
         const url = new URL(req.url ?? '/', 'http://localhost');
 
         if (url.pathname !== REDIRECT_PATH) {
-          res.writeHead(404).end();
+          res.writeHead(404, { Connection: 'close' }).end();
           return;
         }
-
-        res.writeHead(200, { 'Content-Type': 'text/html' });
-        res.end('<html><body>You can close this window and return to onshape-link.</body></html>');
-        clearTimeout(timeout);
-        server.close();
 
         const authError = url.searchParams.get('error');
-        if (authError) {
-          reject(new Error(`Onshape authorization failed: ${authError}`));
-          return;
-        }
-
         const code = url.searchParams.get('code');
         const returnedState = url.searchParams.get('state');
-        if (!code || returnedState !== expectedState) {
-          reject(new Error('Invalid Onshape OAuth callback'));
+
+        // A stale tab from an earlier attempt hitting the callback must not
+        // kill the attempt that's actually in progress.
+        if (!authError && returnedState !== expectedState) {
+          respond(res, 'This sign-in link has expired. Return to Onshape Link and click Connect again.');
           return;
         }
 
-        resolve(code);
+        if (authError) {
+          const description = url.searchParams.get('error_description');
+          respond(res, 'Onshape sign-in was not completed. You can close this window.');
+          finish(new Error(`Onshape authorization failed: ${description || authError}`));
+          return;
+        }
+
+        if (!code) {
+          respond(res, 'Onshape did not return an authorization code. Please try again.');
+          finish(new Error('Onshape OAuth callback was missing the authorization code'));
+          return;
+        }
+
+        respond(res, 'Signed in. You can close this window and return to Onshape Link.');
+        finish(null, code);
       });
     });
   }
@@ -223,10 +322,12 @@ export class OnshapeAuth {
       return;
     }
 
-    this.tokens = await this.requestToken({
+    const previousRefreshToken = this.tokens.refreshToken;
+    const refreshed = await this.requestToken({
       grant_type: 'refresh_token',
-      refresh_token: this.tokens.refreshToken
+      refresh_token: previousRefreshToken
     });
+    this.tokens = { ...refreshed, refreshToken: refreshed.refreshToken || previousRefreshToken };
     this.tokenStore.save(this.tokens);
   }
 
@@ -243,19 +344,23 @@ export class OnshapeAuth {
     });
 
     if (!response.ok) {
-      throw new Error(`Onshape token request failed with status ${response.status}`);
+      throw new OnshapeTokenRejectedError(response.status, await readErrorDetail(response));
     }
 
     const payload = (await response.json()) as {
-      access_token: string;
-      refresh_token: string;
-      expires_in: number;
+      access_token?: string;
+      refresh_token?: string;
+      expires_in?: number;
     };
+
+    if (!payload.access_token) {
+      throw new Error('Onshape token response did not include an access token');
+    }
 
     return {
       accessToken: payload.access_token,
-      refreshToken: payload.refresh_token,
-      expiresAt: Date.now() + payload.expires_in * 1000
+      refreshToken: payload.refresh_token ?? '',
+      expiresAt: Date.now() + (payload.expires_in ?? 3600) * 1000
     };
   }
 
@@ -265,20 +370,50 @@ export class OnshapeAuth {
     }
 
     const response = await fetch(SESSION_URL, {
-      headers: { Authorization: `Bearer ${this.tokens.accessToken}` },
+      headers: { Authorization: `Bearer ${this.tokens.accessToken}`, Accept: 'application/json' },
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
     });
 
     if (!response.ok) {
-      throw new Error(`Onshape session request failed with status ${response.status}`);
+      throw new Error(`Onshape profile request failed (${response.status}): ${await readErrorDetail(response)}`);
     }
 
-    const payload = (await response.json()) as { id: string; name: string };
-    return { id: payload.id, name: payload.name };
+    const payload = (await response.json()) as { id: string; name?: string; firstName?: string; email?: string };
+    return { id: payload.id, name: payload.name || payload.firstName || payload.email || 'Onshape user' };
   }
 
-  private setState(state: OnshapeAuthState): void {
+  private setState(state: OnshapeAuthState, error?: unknown): void {
     this.state = state;
+    this.lastError = state === 'error' ? describeError(error) : null;
     this.onStateChange?.(state, this.user);
   }
+}
+
+function respond(res: import('node:http').ServerResponse, message: string): void {
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', Connection: 'close' });
+  res.end(`<html><body style="font-family:sans-serif;padding:2em">${message}</body></html>`);
+}
+
+async function readErrorDetail(response: Response): Promise<string> {
+  try {
+    const text = (await response.text()).trim();
+    try {
+      const parsed = JSON.parse(text) as { error?: string; error_description?: string; message?: string };
+      return parsed.error_description || parsed.message || parsed.error || text;
+    } catch {
+      return text.slice(0, 200);
+    }
+  } catch {
+    return '';
+  }
+}
+
+function describeError(error: unknown): string {
+  if (error instanceof Error) {
+    if (error.name === 'TimeoutError' || error.name === 'AbortError') {
+      return 'Onshape took too long to respond. Check your connection and try again.';
+    }
+    return error.message;
+  }
+  return error ? String(error) : 'Unknown error';
 }

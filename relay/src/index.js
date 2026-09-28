@@ -15,6 +15,15 @@ const ALLOWED_GRANT_TYPES = new Set(['authorization_code', 'refresh_token']);
 
 export default {
   async fetch(request, env) {
+    // Trim defensively: a value pasted into `wrangler secret put` easily
+    // picks up a stray newline, and Onshape then rejects the client with a
+    // generic "Could not authenticate client".
+    const expectedClientId = (env.ONSHAPE_CLIENT_ID ?? '').trim();
+    const clientSecret = (env.ONSHAPE_CLIENT_SECRET ?? '').trim();
+    if (!expectedClientId || !clientSecret) {
+      return json({ error: 'server_error', error_description: 'Relay is missing its Onshape client credentials' }, 500);
+    }
+
     if (request.method !== 'POST') {
       return json({ error: 'method_not_allowed' }, 405);
     }
@@ -37,14 +46,17 @@ export default {
       return json({ error: 'unsupported_grant_type' }, 400);
     }
 
-    if (clientId !== env.ONSHAPE_CLIENT_ID) {
-      return json({ error: 'invalid_client' }, 401);
+    if (typeof clientId !== 'string' || clientId.trim() !== expectedClientId) {
+      return json(
+        { error: 'invalid_client', error_description: 'Client id does not match the one this relay is configured for' },
+        401
+      );
     }
 
     const params = new URLSearchParams({
       grant_type: grantType,
-      client_id: env.ONSHAPE_CLIENT_ID,
-      client_secret: env.ONSHAPE_CLIENT_SECRET
+      client_id: expectedClientId,
+      client_secret: clientSecret
     });
 
     if (grantType === 'authorization_code') {
@@ -60,11 +72,16 @@ export default {
       params.set('refresh_token', refreshToken);
     }
 
-    const upstream = await fetch(ONSHAPE_TOKEN_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: params.toString()
-    });
+    let upstream;
+    try {
+      upstream = await fetch(ONSHAPE_TOKEN_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+        body: params.toString()
+      });
+    } catch (error) {
+      return json({ error: 'temporarily_unavailable', error_description: `Could not reach Onshape: ${error}` }, 502);
+    }
 
     const upstreamBody = await upstream.text();
     return new Response(upstreamBody, {

@@ -51,6 +51,10 @@
     color: #9aa0a6;
     margin-top: 14px;
     text-align: center;
+    word-break: break-word;
+  }
+  .hint.error {
+    color: #f28b82;
   }
 </style>
 </head>
@@ -88,12 +92,21 @@
           ? 'Connected as ' + state.onshapeUser.name
           : ONSHAPE_LABELS[state.onshapeState] || state.onshapeState;
 
-      button.disabled = state.onshapeState === 'connecting';
-      button.textContent = state.onshapeState === 'connected' ? 'Reconnect Onshape' : 'Connect to Onshape';
+      button.textContent =
+        state.onshapeState === 'connected'
+          ? 'Reconnect Onshape'
+          : state.onshapeState === 'connecting'
+            ? 'Restart sign-in'
+            : 'Connect to Onshape';
+      hint.classList.toggle('error', state.onshapeState === 'error' && !!state.onshapeError);
       hint.textContent =
         state.onshapeState === 'connected'
           ? 'You can close this window.'
-          : 'Opens your browser to sign in to Onshape.';
+          : state.onshapeState === 'connecting'
+            ? 'Finish signing in in your browser. Stuck? Click Restart sign-in.'
+            : state.onshapeState === 'error' && state.onshapeError
+              ? state.onshapeError
+              : 'Opens your browser to sign in to Onshape.';
     }
 
     button.addEventListener('click', () => {

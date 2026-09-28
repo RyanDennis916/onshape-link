@@ -138,7 +138,8 @@ function broadcastOnshapeState(): void {
   onboardingWindow?.webContents.send('onshape:state', {
     discordState: client.getState() as DiscordConnectionState,
     onshapeState,
-    onshapeUser
+    onshapeUser,
+    onshapeError: onshapeAuth.getLastError()
   });
 }
 
@@ -151,7 +152,7 @@ function openOnboardingWindow(): void {
 
   onboardingWindow = new BrowserWindow({
     width: 340,
-    height: 360,
+    height: 400,
     resizable: false,
     minimizable: false,
     fullscreenable: false,
@@ -180,10 +181,20 @@ ipcMain.handle('onshape:connect', () => {
 ipcMain.handle('onshape:get-state', () => ({
   discordState: client.getState() as DiscordConnectionState,
   onshapeState,
-  onshapeUser
+  onshapeUser,
+  onshapeError: onshapeAuth.getLastError()
 }));
 
 async function bootstrap(): Promise<void> {
+  // A second copy (e.g. launched again from the Start menu / Applications
+  // while the first sits in the tray) would fight over the OAuth redirect
+  // port and the Discord RPC socket. Hand off to the running one instead.
+  if (!app.requestSingleInstanceLock()) {
+    app.quit();
+    return;
+  }
+  app.on('second-instance', () => openOnboardingWindow());
+
   await app.whenReady();
 
   app.dock?.hide();
