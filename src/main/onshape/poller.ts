@@ -21,6 +21,14 @@ export class OnshapePoller {
   private running = false;
   private lastPresence: PresenceState | null = null;
   private backoffUntil = 0;
+  // Onshape exposes no "last opened" time, only modifiedAt (last edit), so
+  // just viewing a document never counted as activity and presence vanished
+  // 10 minutes after the last edit. We also treat a document newly rising
+  // to the top of the Recent list as activity. The very first observation
+  // after sign-in isn't counted, so launching the app doesn't resurrect a
+  // document that was last opened days ago.
+  private topDocumentId: string | null = null;
+  private topDocumentSince = 0;
 
   constructor(private readonly options: OnshapePollerOptions) {}
 
@@ -30,6 +38,28 @@ export class OnshapePoller {
     }
 
     this.running = true;
+    void this.tick();
+  }
+
+  /**
+   * Forgets what was last reported and polls right away. Called whenever
+   * Onshape (re)connects: the app clears the displayed presence while
+   * disconnected, and without this the poller would consider an unchanged
+   * document "already reported" and never send it again.
+   */
+  public refresh(): void {
+    this.lastPresence = null;
+    this.topDocumentId = null;
+    this.topDocumentSince = 0;
+
+    if (!this.running) {
+      return;
+    }
+
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
     void this.tick();
   }
 
@@ -94,8 +124,14 @@ export class OnshapePoller {
       return null;
     }
 
+    if (doc.id !== this.topDocumentId) {
+      this.topDocumentSince = this.topDocumentId === null ? 0 : Date.now();
+      this.topDocumentId = doc.id;
+    }
+
+    const lastActivityAt = Math.max(doc.modifiedAt, this.topDocumentSince);
     const idleMs = this.options.idleTimeoutMin * 60_000;
-    const idle = Date.now() - doc.modifiedAt > idleMs;
+    const idle = Date.now() - lastActivityAt > idleMs;
 
     if (idle) {
       return {

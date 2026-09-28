@@ -68,6 +68,10 @@ const onshapeAuth = new OnshapeAuth({
       setTimeout(() => onboardingWindow?.close(), 1500);
     }
 
+    if (state === 'connected') {
+      onshapePoller.refresh();
+    }
+
     if (state !== 'connected') {
       presence.status = 'not-connected';
       presence.details = 'Onshape Link';
